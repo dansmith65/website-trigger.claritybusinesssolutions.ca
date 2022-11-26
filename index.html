@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta http-equiv="X-UA-Compatible" content="ie=edge">
+	<title>Clarity Business Solutions - trigger</title>
+</head>
+<body>
+	<h1>Clarity Business Solutions</h1>
+	<div id="webhook-result"></div>
+	<script>
+		/* NOTE: this can be copied from the urlGenerator file: */
+		var allowedDomainHash = '14739DE048CF0C92F702C917195191AA94D8910BAAFC9B8E80810DD311D641B1' ;
+
+		var resultElement = document.getElementById('webhook-result');
+
+		async function sha256(message) {
+			// source: https://stackoverflow.com/a/48161723/1327931
+			// encode as UTF-8
+			const msgBuffer = new TextEncoder().encode(message);					
+			// hash the message
+			const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+			// convert ArrayBuffer to Array
+			const hashArray = Array.from(new Uint8Array(hashBuffer));
+			// convert bytes to hex string				  
+			const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+			return hashHex.toUpperCase();
+		}
+
+		async function validateParameters(domain, path, query, verification) {
+			console.info({domain, path, query});
+			if (! domain) {
+				throw 'domain parameter is required';
+			}
+			
+			var domainHash = await sha256(domain);
+			if (domainHash != allowedDomainHash) {
+				/* NOTE: this prevents someone else from using this page to "forward" requests to other servers */
+				console.error('domainHash', domainHash);
+				console.error('allowedDomainHash', allowedDomainHash);
+				throw 'this domain is not allowed: ' + domain;
+			}
+
+			var verificationHash = await sha256(domain + path + query);
+			if (! verification) {
+				throw 'verification parameter is required';
+			} else if (verificationHash != verification) {
+				/* NOTE: this prevents requests from spam filters when they change query parameters to test urls in emails. */
+				console.error('verification', verification);
+				console.error('verificationHash', verificationHash);
+				throw 'verification hash failed';
+			}
+		}
+
+
+		/* get parameters */
+		parameterList = new URLSearchParams(window.location.search);
+		/* domain must be passed in and must be ONLY the domain name (including sub, if necessary, and top level domain) */
+		var domain = parameterList.get('domain');
+		var path = parameterList.get('path');
+		var query = parameterList.get('query');
+		/* verification hash must be passed in and must produce the same hash as below function */
+		var verification = parameterList.get('verification');
+
+		validateParameters(domain, path, query, verification)
+			.then(function() {
+				/* send to webhook */
+				var url = 'https://' + domain;
+				if (path) {
+					if (! path.startsWith('/')) {
+						url += '/';
+					}
+					url += path;
+				}
+				if (query) {
+					url += '?' + query;
+				}
+				console.info('url', url);
+				var f = document.createElement('form');
+				f.setAttribute('method', 'post');
+				f.setAttribute('action', url );
+				document.body.appendChild(f);
+				f.submit();
+				/* NOTE: on error here, user will be taken to domain, which will show an error (in one isolated test, at least) */
+
+				/* show user the result */
+				resultElement.innerHTML = '<h3>Success!</h3>';
+			})
+			.catch(function(message) {
+			    resultElement.innerHTML = '<h3>Error!</h3><p>' + message + '</p>';
+                console.error(message);
+			})
+	</script>
+</body>
+</html>
